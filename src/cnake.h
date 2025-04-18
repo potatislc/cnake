@@ -2,9 +2,10 @@
 #define CNAKE_H
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <functional>
+#include <memory>
 #include <string>
 
 class Object {
@@ -13,29 +14,13 @@ public:
   static constexpr std::array<const char *, static_cast<size_t>(Type::count)>
       type_names{"None", "Number"};
 
-  Object() = default;
   virtual ~Object() = default;
-  Object(const Object &other) {
-    std::memcpy(&m_data, &other.m_data, sizeof(m_data));
-  }
-  Object &operator=(const Object &other) {
-    std::memcpy(&m_data, &other.m_data, sizeof(m_data));
-    return *this;
-  }
-  Object(const Object &&) = delete;
-  Object &operator=(const Object &&) = delete;
 
+  virtual std::shared_ptr<Object> clone() const = 0;
+  virtual const void *get_raw() const = 0;
   virtual Type type() const = 0;
   virtual const char *type_name() const = 0;
-  [[nodiscard]] uintptr_t *get_raw() { return &m_data; }
-  [[nodiscard]] const uintptr_t *get_raw() const { return &m_data; }
   virtual std::string to_string() const = 0;
-  template <typename T> static T &get(Object &object) {
-    return *reinterpret_cast<T *>(object.get_raw());
-  }
-  template <typename T> static const T &get(const Object &object) {
-    return *reinterpret_cast<const T *>(object.get_raw());
-  }
 
   virtual Object &operator+(const Object &) const = 0;
   virtual Object &operator+=(const Object &) = 0;
@@ -45,140 +30,225 @@ public:
   virtual Object &operator*=(const Object &) = 0;
   virtual Object &operator/(const Object &) const = 0;
   virtual Object &operator/=(const Object &) = 0;
+};
 
-private:
-  uintptr_t m_data{};
+class None : public Object {
+public:
+  static None failsafe_none;
+  static const uint64_t failsafe_null;
+
+  std::shared_ptr<Object> clone() const override {
+    return std::make_shared<None>(*this);
+  }
+  const void *get_raw() const override { return &failsafe_null; }
+  Type type() const override { return Type::NONE; }
+  const char *type_name() const override {
+    return type_names.at(static_cast<size_t>(Object::Type::NONE));
+  }
+  std::string to_string() const override { return ""; }
+
+  Object &operator+(const Object &other) const override {
+    if (other.type() == type())
+      return failsafe_none;
+    return other + *this;
+  }
+  Object &operator+=(const Object &) override { return *this; }
+  Object &operator-(const Object &other) const override {
+    if (other.type() == type())
+      return failsafe_none;
+    return other - *this;
+  }
+  Object &operator-=(const Object &) override { return *this; }
+  Object &operator*(const Object &other) const override {
+    if (other.type() == type())
+      return failsafe_none;
+    return other * *this;
+  }
+  Object &operator*=(const Object &) override { return *this; }
+  Object &operator/(const Object &other) const override {
+    if (other.type() == type())
+      return failsafe_none;
+    return other / *this;
+  }
+  Object &operator/=(const Object &) override { return *this; }
 };
 
 class Number : public Object {
 public:
   using number_t = double;
   using int_number_t = long long;
-  template <typename T>
-  using is_valid_primitive_t =
-      std::bool_constant<std::is_same_v<T, int> || std::is_same_v<T, short> ||
-                         std::is_same_v<T, long> || std::is_same_v<T, float> ||
-                         std::is_same_v<T, double> || std::is_same_v<T, bool>>;
+  Number() : m_value{} {}
+  Number(const Object &other) : m_value(as_number(other)) {}
+  Number(number_t value) : m_value(value) {}
+  ~Number() override = default;
 
-  Number() : Object() {}
-  Number(const Object &other) : Object(other) {}
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Number(T value) {
-    get<number_t>(*this) = static_cast<number_t>(value);
+  std::shared_ptr<Object> clone() const override {
+    return std::make_shared<Number>(*this);
   }
-
+  const void *get_raw() const override { return &m_value; }
   Type type() const override { return Type::NUMBER; }
   const char *type_name() const override {
     return type_names.at(static_cast<size_t>(type()));
   }
-  std::string to_string() const override {
-    return std::to_string(get<number_t>(*this));
+  std::string to_string() const override { return std::to_string(m_value); }
+
+  Number &operator+(const Object &other) const override {
+    return result = m_value + as_number(other);
   }
 
-  //
-  // Arithmetic operations
-  //
-
-  template <typename Op> Object &binary_op(const Object &other, Op op) const {
-    return operation_result = op(get<number_t>(*this), get<number_t>(other));
-  }
-
-  template <typename Op> Object &compound_op(const Object &other, Op op) {
-    auto &lhs = get<number_t>(*this);
-    lhs = op(lhs, get<number_t>(other));
+  Number &operator+=(const Object &other) override {
+    m_value += as_number(other);
     return *this;
   }
 
-  template <typename T, typename Op,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &binary_op(T value, Op op) const {
-    return operation_result =
-               op(get<number_t>(*this), static_cast<number_t>(value));
-  }
+  Number &operator+(number_t value) const { return result = m_value + value; }
 
-  template <typename T, typename Op,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &compound_op(T value, Op op) {
-    auto &lhs = get<number_t>(*this);
-    lhs = op(lhs, static_cast<number_t>(value));
+  Number &operator+=(number_t value) {
+    m_value += value;
     return *this;
   }
 
-  // '+' Operator
-  Object &operator+(const Object &other) const override {
-    return binary_op(other, std::plus<number_t>());
-  }
-  Object &operator+=(const Object &other) override {
-    return compound_op(other, std::plus<number_t>());
-  }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator+(T value) const {
-    return binary_op(value, std::plus<number_t>());
-  }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator+=(T value) {
-    return compound_op(value, std::plus<number_t>());
+  Number &operator-(const Object &other) const override {
+    return result = m_value - as_number(other);
   }
 
-  // '-' Operator
-  Object &operator-(const Object &other) const override {
-    return binary_op(other, std::minus<number_t>());
-  }
-  Object &operator-=(const Object &other) override {
-    return compound_op(other, std::minus<number_t>());
-  }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator-(T value) const {
-    return binary_op(value, std::minus<number_t>());
-  }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator-=(T value) {
-    return compound_op(value, std::minus<number_t>());
+  Number &operator-=(const Object &other) override {
+    m_value -= as_number(other);
+    return *this;
   }
 
-  // '*' Operator
-  Object &operator*(const Object &other) const override {
-    return binary_op(other, std::multiplies<number_t>());
-  }
-  Object &operator*=(const Object &other) override {
-    return compound_op(other, std::multiplies<number_t>());
-  }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator*(T value) const {
-    return binary_op(value, std::multiplies<number_t>());
-  }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator*=(T value) {
-    return compound_op(value, std::multiplies<number_t>());
+  Number &operator-(number_t value) const { return result = m_value - value; }
+
+  Number &operator-=(number_t value) {
+    m_value -= value;
+    return *this;
   }
 
-  // '/' Operator
-  Object &operator/(const Object &other) const override {
-    return binary_op(other, std::divides<number_t>());
+  Number &operator*(const Object &other) const override {
+    return result = m_value * as_number(other);
   }
-  Object &operator/=(const Object &other) override {
-    return compound_op(other, std::divides<number_t>());
+
+  Number &operator*=(const Object &other) override {
+    m_value *= as_number(other);
+    return *this;
   }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator/(T value) const {
-    return binary_op(value, std::divides<number_t>());
+
+  Number &operator*(number_t value) const { return result = m_value * value; }
+
+  Number &operator*=(number_t value) {
+    m_value *= value;
+    return *this;
   }
-  template <typename T,
-            typename = std::enable_if_t<is_valid_primitive_t<T>::value>>
-  Object &operator/=(T value) {
-    return compound_op(value, std::divides<number_t>());
+
+  Number &operator/(const Object &other) const override {
+    return result = m_value / as_number(other);
+  }
+
+  Number &operator/=(const Object &other) override {
+    m_value /= as_number(other);
+    return *this;
+  }
+
+  Number &operator/(number_t value) const { return result = m_value / value; }
+
+  Number &operator/=(number_t value) {
+    m_value /= value;
+    return *this;
   }
 
 private:
-  static thread_local Number operation_result;
+  number_t m_value;
+
+  number_t as_number(const Object &other) const {
+    // Fast reinterpret no branching
+    return *reinterpret_cast<const number_t *>(other.get_raw()) *
+           (type() == other.type());
+    // return reinterpret_cast<const Number &>(other).m_value *
+    //        (type() == other.type());
+    // RTTI required
+    // return dynamic_cast<const Number &>(obj).m_value;
+  }
+
+  static thread_local Number result;
 };
+
+//
+// Var
+//
+
+class var {
+public:
+  var() : m_obj(std::make_shared<None>()) {}
+  var(const Object &obj) { m_obj = obj.clone(); }
+  var(Number::number_t value) { m_obj = std::make_shared<Number>(value); }
+  var(const var &other) : m_obj(other.m_obj) {}
+  var &operator=(const var &other) {
+    if (m_obj != other.m_obj)
+      m_obj = other.m_obj;
+    return *this;
+  }
+  var &operator=(const Object &obj) {
+    m_obj = obj.clone();
+    return *this;
+  }
+  ~var() = default;
+
+  Object::Type type() const { return m_obj->type(); }
+  const char *type_name() const { return m_obj->type_name(); }
+  std::string to_string() const { return m_obj->to_string(); }
+
+  var operator+(const var &other) { return {*m_obj + *other.m_obj}; }
+  var operator+(const Object &obj) { return {*m_obj + obj}; }
+  var &operator+=(const var &other) {
+    *m_obj += *other.m_obj;
+    return *this;
+  }
+  var &operator+=(const Object &obj) {
+    *m_obj += obj;
+    return *this;
+  }
+
+  var operator-(const var &other) { return {*m_obj - *other.m_obj}; }
+  var operator-(const Object &obj) { return {*m_obj - obj}; }
+  var &operator-=(const var &other) {
+    *m_obj -= *other.m_obj;
+    return *this;
+  }
+  var &operator-=(const Object &obj) {
+    *m_obj -= obj;
+    return *this;
+  }
+
+  var operator*(const var &other) { return {*m_obj * *other.m_obj}; }
+  var operator*(const Object &obj) { return {*m_obj * obj}; }
+  var &operator*=(const var &other) {
+    *m_obj *= *other.m_obj;
+    return *this;
+  }
+  var &operator*=(const Object &obj) {
+    *m_obj *= obj;
+    return *this;
+  }
+
+  var operator/(const var &other) { return {*m_obj / *other.m_obj}; }
+  var operator/(const Object &obj) { return {*m_obj / obj}; }
+  var &operator/=(const var &other) {
+    *m_obj /= *other.m_obj;
+    return *this;
+  }
+  var &operator/=(const Object &obj) {
+    *m_obj /= obj;
+    return *this;
+  }
+
+private:
+  std::shared_ptr<Object> m_obj;
+};
+
+void print(const char *);
+void print(const std::string &);
+void print(Number::number_t);
+void print(const Object &);
+void print(const var &);
 
 #endif

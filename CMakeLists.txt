@@ -16,4 +16,5 @@ add_compile_options(
 
 add_link_options(-fsanitize=address)
 
-add_executable(test_number examples/test_number.cpp src/cnake.cpp)
+add_executable(test_number tests/test_number.cpp src/cnake.cpp)
+add_executable(test_var tests/test_var.cpp src/cnake.cpp)

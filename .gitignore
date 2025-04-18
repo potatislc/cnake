@@ -1,6 +1,7 @@
 # Directories
 /.cache
 /build
+/tests
 
 #Files
 main.cpp
