@@ -32,6 +32,9 @@ public:
   virtual Object &operator/=(const Object &) = 0;
 };
 
+class None;
+class Number;
+
 class None : public Object {
 public:
   static None failsafe_none;
@@ -53,32 +56,39 @@ public:
     return other + *this;
   }
   Object &operator+=(const Object &) override { return *this; }
-  Object &operator-(const Object &other) const override {
-    if (other.type() == type())
-      return failsafe_none;
-    return other - *this;
+  Object &operator-(const Object &) const override {
+    return failsafe_none; // return other * Number(-1)
   }
   Object &operator-=(const Object &) override { return *this; }
   Object &operator*(const Object &other) const override {
-    if (other.type() == type())
-      return failsafe_none;
     return other * *this;
   }
   Object &operator*=(const Object &) override { return *this; }
-  Object &operator/(const Object &other) const override {
-    if (other.type() == type())
-      return failsafe_none;
-    return other / *this;
-  }
+  Object &operator/(const Object &) const override { return failsafe_none; }
   Object &operator/=(const Object &) override { return *this; }
 };
 
 class Number : public Object {
 public:
   using number_t = double;
-  using int_number_t = long long;
+  using int_number_t = int64_t;
+
   Number() : m_value{} {}
   Number(const Object &other) : m_value(as_number(other)) {}
+  Number &operator=(const Object &other) {
+    m_value = as_number(other);
+    return *this;
+  }
+  Number(const Number &other) : m_value(other.m_value) {}
+  Number &operator=(const Number &other) {
+    m_value = other.m_value;
+    return *this;
+  }
+  Number(Number &&other) noexcept : m_value(other.m_value) {}
+  Number &operator=(Number &&other) noexcept {
+    m_value = other.m_value;
+    return *this;
+  }
   Number(number_t value) : m_value(value) {}
   ~Number() override = default;
 
@@ -172,6 +182,40 @@ private:
   static thread_local Number result;
 };
 
+// class Boolean : public Object {
+// public:
+//   using boolean_t = uint64_t;
+
+//   Boolean() : m_data{} {}
+//   Boolean(bool value) : m_data(value) {}
+
+//   std::shared_ptr<Object> clone() const override {
+//     return std::make_shared<Boolean>(*this);
+//   }
+//   const void *get_raw() const override { return &m_data; }
+//   Type type() const override { return Type::BOOLEAN; }
+//   const char *type_name() const override {
+//     return type_names.at(static_cast<size_t>(Type::BOOLEAN));
+//   }
+//   std::string to_string() const override { return (m_data) ? "True" :
+//   "False"; }
+
+//   // Object &operator+(const Object &) const override {
+//   //   return reint
+//   // }
+//   // Object &operator+=(const Object &) = 0;
+//   // Object &operator-(const Object &) const = 0;
+//   // Object &operator-=(const Object &) = 0;
+//   // Object &operator*(const Object &) const = 0;
+//   // Object &operator*=(const Object &) = 0;
+//   // Object &operator/(const Object &) const = 0;
+//   // Object &operator/=(const Object &) = 0;
+// private:
+//   // static boolean_t as_boolean(const Object &obj){return }
+
+//   boolean_t m_data;
+// };
+
 //
 // Var
 //
@@ -181,6 +225,7 @@ public:
   var() : m_obj(std::make_shared<None>()) {}
   var(const Object &obj) { m_obj = obj.clone(); }
   var(Number::number_t value) { m_obj = std::make_shared<Number>(value); }
+  // var(Boolean::boolean_t value) { m_obj = std::make_shared<Boolean>(value); }
   var(const var &other) : m_obj(other.m_obj) {}
   var &operator=(const var &other) {
     if (m_obj != other.m_obj)
